@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>KIRK // INVESTIGATION BOARD</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap');
+
+:root {
+  --bg: #050a0e;
+  --panel-bg: #070d12;
+  --border: #0f2d3d;
+  --documented: #00ff88;
+  --alleged: #ff6b00;
+  --person: #00b4ff;
+  --org: #bf00ff;
+  --event: #ff0055;
+  --funding: #ffd700;
+  --text: #7aadbe;
+  --text-bright: #c8e6f0;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { width:100%; height:100%; background:var(--bg); color:var(--text); font-family:'Share Tech Mono',monospace; overflow:hidden; touch-action:none; }
+
+body::before {
+  content:''; position:fixed; inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.12) 2px,rgba(0,0,0,0.12) 4px);
+  pointer-events:none; z-index:999;
+}
+body::after {
+  content:''; position:fixed; inset:0;
+  background-image:linear-gradient(rgba(0,180,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,255,0.025) 1px,transparent 1px);
+  background-size:40px 40px; pointer-events:none; z-index:0;
+}
+
+/* HEADER */
+#header {
+  position:fixed; top:0; left:0; right:0; height:48px;
+  background:rgba(5,10,14,0.97); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 14px; gap:10px; z-index:100;
+}
+#header h1 {
+  font-family:'Orbitron',monospace; font-size:11px; font-weight:900;
+  color:var(--documented); letter-spacing:3px;
+  text-shadow:0 0 8px #00ff88,0 0 16px #00ff8855;
+  animation:flicker 10s infinite; white-space:nowrap;
+}
+@keyframes flicker { 0%,94%,100%{opacity:1}95%{opacity:.3}96%{opacity:1}98%{opacity:.5}99%{opacity:1} }
+
+/* LEGEND — full 5 types */
+.legend { display:flex; gap:8px; align-items:center; margin-left:auto; flex-wrap:nowrap; }
+.leg { display:flex; align-items:center; gap:4px; font-size:8px; letter-spacing:1px; white-space:nowrap; }
+.dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.d-person  { background:var(--person);  box-shadow:0 0 5px var(--person); }
+.d-org     { background:var(--org);     box-shadow:0 0 5px var(--org); }
+.d-event   { background:var(--event);   box-shadow:0 0 5px var(--event); }
+.d-funding { background:var(--funding); box-shadow:0 0 5px var(--funding); }
+.d-alleged { background:var(--alleged); box-shadow:0 0 5px var(--alleged); }
+/* collapse legend labels on small screens, keep dots */
+@media(max-width:560px){ .leg span{display:none;} }
+
+/* FILTER BAR — taller touch targets */
+#filters {
+  position:fixed; top:48px; left:0; right:0; height:44px;
+  background:rgba(5,10,14,0.95); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 10px; gap:6px;
+  overflow-x:auto; overflow-y:hidden; z-index:100; scrollbar-width:none;
+}
+#filters::-webkit-scrollbar { display:none; }
+.filter-btn {
+  flex-shrink:0; background:none; border:1px solid var(--border);
+  color:var(--text); font-family:'Share Tech Mono',monospace;
+  font-size:10px; letter-spacing:1px;
+  padding:0 14px; height:32px; min-width:44px;
+  cursor:pointer; transition:all .2s; white-space:nowrap;
+}
+.filter-btn.active, .filter-btn:hover {
+  border-color:var(--documented); color:var(--documented); background:rgba(0,255,136,0.06);
+}
+
+/* GRAPH */
+#graph { position:fixed; top:92px; left:0; right:0; bottom:28px; z-index:1; }
+svg { width:100%; height:100%; }
+
+.link { stroke-opacity:.5; stroke-width:1.2; }
+.link.documented { stroke:var(--documented); }
+.link.alleged    { stroke:var(--alleged); stroke-dasharray:5,4; }
+.link.funding    { stroke:var(--funding); stroke-dasharray:3,3; }
+
+.node circle { cursor:pointer; stroke-width:1.5; transition:stroke-width .15s, stroke-opacity .15s; }
+.node.selected circle { stroke-width:3; stroke-opacity:1; }
+.node text {
+  font-family:'Share Tech Mono',monospace; font-size:10px;
+  fill:var(--text-bright); pointer-events:none;
+  text-anchor:middle; font-weight:600;
+}
+
+/* DETAIL PANEL */
+#detail-panel {
+  position:fixed; left:0; right:0; bottom:-100%; height:55%;
+  background:var(--panel-bg); border-top:1px solid var(--border);
+  z-index:300; transition:bottom .3s cubic-bezier(.4,0,.2,1);
+  overflow-y:auto; padding:16px; -webkit-overflow-scrolling:touch;
+}
+#detail-panel.open { bottom:0; }
+
+@media(min-width:600px){
+  #detail-panel {
+    top:92px; right:-440px; left:auto; bottom:28px; width:420px; height:auto;
+    border-top:none; border-left:1px solid var(--border);
+    transition:right .3s cubic-bezier(.4,0,.2,1);
+  }
+  #detail-panel.open { right:0; }
+}
+
+#panel-handle { width:40px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 14px; display:block; }
+@media(min-width:600px){ #panel-handle{display:none;} }
+
+#panel-close {
+  position:absolute; top:12px; right:12px; background:none;
+  border:1px solid var(--border); color:var(--text);
+  font-family:'Share Tech Mono',monospace; font-size:10px;
+  padding:0 12px; height:32px; min-width:44px;
+  cursor:pointer; letter-spacing:1px;
+}
+#panel-close:hover { border-color:var(--event); color:var(--event); }
+
+#panel-cat { font-size:8px; letter-spacing:3px; text-transform:uppercase; margin-bottom:6px; }
+#panel-title { font-family:'Orbitron',monospace; font-size:15px; font-weight:700; color:var(--text-bright); margin-bottom:8px; line-height:1.3; }
+#panel-status { font-size:9px; letter-spacing:2px; padding:3px 8px; display:inline-block; border:1px solid; margin-bottom:14px; }
+#panel-status.documented { color:var(--documented); border-color:var(--documented); background:rgba(0,255,136,0.05); }
+#panel-status.alleged    { color:var(--alleged);    border-color:var(--alleged);    background:rgba(255,107,0,0.05); }
+
+#panel-desc { font-size:11px; line-height:1.7; color:var(--text); margin-bottom:14px; border-left:2px solid var(--border); padding-left:10px; }
+
+.panel-section-title { font-size:9px; letter-spacing:2px; color:var(--text); text-transform:uppercase; margin-bottom:6px; margin-top:14px; }
+
+.connection-tag {
+  display:inline-flex; align-items:center; gap:5px;
+  border:1px solid var(--border);
+  font-size:9px; padding:3px 8px; margin:2px; cursor:pointer; letter-spacing:1px; transition:all .2s;
+}
+.connection-tag:hover { border-color:var(--text-bright); color:var(--text-bright); }
+.tag-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+
+.source-link { display:block; font-size:9px; color:var(--documented); text-decoration:none; margin-top:5px; word-break:break-all; opacity:.8; }
+.source-link:hover { opacity:1; text-decoration:underline; }
+
+/* STATUS BAR */
+#status-bar {
+  position:fixed; bottom:0; left:0; right:0; height:28px;
+  background:rgba(5,10,14,0.97); border-top:1px solid var(--border);
+  display:flex; align-items:center; padding:0 14px; gap:16px;
+  font-size:9px; letter-spacing:2px; z-index:100;
+}
+#status-text { color:var(--documented); }
+#node-info { color:var(--text); margin-left:auto; }
+
+/* RESET/HOME BUTTON */
+#home-btn {
+  position:fixed; bottom:36px; right:14px;
+  width:44px; height:44px;
+  background:rgba(8,15,20,0.95);
+  border:1px solid var(--border);
+  color:var(--text); font-size:16px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; z-index:200;
+  transition:all .2s;
+}
+#home-btn:hover { border-color:var(--documented); color:var(--documented); }
+
+/* FILTER HINT */
+#filter-hint {
+  position:fixed; top:100px; left:50%; transform:translateX(-50%);
+  background:rgba(8,15,20,0.92); border:1px solid var(--border);
+  color:var(--text); font-size:9px; letter-spacing:2px;
+  padding:5px 14px; z-index:200; pointer-events:none;
+  opacity:0; transition:opacity .3s;
+  white-space:nowrap;
+}
+#filter-hint.show { opacity:1; }
+#overlay {
+  position:fixed; inset:0; background:rgba(5,10,14,0.92);
+  z-index:500; display:flex; align-items:center; justify-content:center;
+  flex-direction:column; gap:20px; padding:30px;
+  transition:opacity .4s ease;
+}
+#overlay.hidden { opacity:0; pointer-events:none; }
+#overlay h2 {
+  font-family:'Orbitron',monospace; font-size:16px; font-weight:900;
+  color:var(--documented); letter-spacing:4px; text-align:center;
+  text-shadow:0 0 12px #00ff88;
+}
+.overlay-tips {
+  display:flex; flex-direction:column; gap:10px; max-width:320px; width:100%;
+}
+.tip {
+  display:flex; align-items:flex-start; gap:12px;
+  font-size:11px; line-height:1.6; color:var(--text);
+  border:1px solid var(--border); padding:10px 14px;
+}
+.tip-icon { font-size:16px; flex-shrink:0; margin-top:1px; }
+#overlay-btn {
+  background:none; border:1px solid var(--documented);
+  color:var(--documented); font-family:'Share Tech Mono',monospace;
+  font-size:11px; letter-spacing:3px; padding:10px 28px;
+  cursor:pointer; transition:all .2s;
+  text-shadow:0 0 8px #00ff88;
+}
+#overlay-btn:hover { background:rgba(0,255,136,0.08); }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>KIRK // INVESTIGATION BOARD</h1>
+  <div class="legend">
+    <div class="leg"><div class="dot d-person"></div><span>PERSON</span></div>
+    <div class="leg"><div class="dot d-org"></div><span>ORG</span></div>
+    <div class="leg"><div class="dot d-event"></div><span>EVENT</span></div>
+    <div class="leg"><div class="dot d-funding"></div><span>FUNDING</span></div>
+    <div class="leg"><div class="dot d-alleged"></div><span>QUESTION</span></div>
+  </div>
+</div>
+
+<div id="filters">
+  <button class="filter-btn active" data-filter="all">ALL</button>
+  <button class="filter-btn" data-filter="person">PEOPLE</button>
+  <button class="filter-btn" data-filter="org">ORGS</button>
+  <button class="filter-btn" data-filter="funding">FUNDING</button>
+  <button class="filter-btn" data-filter="event">EVENTS</button>
+  <button class="filter-btn" data-filter="alleged">OPEN QUESTIONS</button>
+</div>
+
+<div id="graph"></div>
+
+<div id="detail-panel">
+  <span id="panel-handle"></span>
+  <button id="panel-close">✕ CLOSE</button>
+  <div id="panel-cat"></div>
+  <div id="panel-title"></div>
+  <div id="panel-status"></div>
+  <div id="panel-desc"></div>
+  <div id="panel-connections"></div>
+  <div id="panel-sources"></div>
+</div>
+
+<div id="status-bar">
+  <span id="status-text">// NETWORK ACTIVE</span>
+  <span id="node-info">TAP NODE TO INVESTIGATE</span>
+</div>
+
+<div id="home-btn" title="Reset view">⌖</div>
+<div id="filter-hint"></div>
+
+<div id="overlay">
+  <h2>// INVESTIGATION BOARD</h2>
+  <div class="overlay-tips">
+    <div class="tip"><span class="tip-icon">☞</span><span>Tap any node to open its evidence panel with sources</span></div>
+    <div class="tip"><span class="tip-icon">⤢</span><span>Drag nodes to rearrange — pinch or scroll to zoom</span></div>
+    <div class="tip"><span class="tip-icon">◈</span><span>Use filters to isolate people, orgs, events, or open questions</span></div>
+    <div class="tip"><span class="tip-icon">◌</span><span>Orange nodes are open questions — not conclusions</span></div>
+  </div>
+  <button id="overlay-btn">ENTER INVESTIGATION</button>
+</div>
+
+<script>
+const nodes = [
+  { id:"kirk", label:"CHARLIE\nKIRK", type:"person", status:"documented", size:30,
+    cat:"SUBJECT",
+    desc:"Founder and CEO of Turning Point USA. Killed September 10 2025 at Utah Valley University. Age 31. Publicly shifting away from pro-Israel alignment weeks before death. Privately told associates he feared being killed for it. Was calling for Epstein file release and opposing Ukraine aid simultaneously.",
+    sources:["https://www.washingtonpost.com/nation/interactive/2025/charlie-kirk-shooting-timeline/","https://www.britannica.com/event/Assassination-of-Charlie-Kirk","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"robinson", label:"TYLER\nROBINSON", type:"person", status:"documented", size:24,
+    cat:"CHARGED SUSPECT",
+    desc:"22-year-old Utah man charged with aggravated murder. Turned himself in 33 hours after shooting, accompanied by his father. Has given ZERO public interviews since arrest. Faces death penalty. Allegedly confessed via text message and Discord. Romantic partner — a transgender person — had no prior knowledge of attack whatsoever.",
+    sources:["https://www.cnn.com/2025/09/29/us/tyler-robinson-charlie-kirk-court","https://abcnews.com/US/tyler-robinson-charlie-kirk-suspect-shooter-utah/story?id=125474359","https://www.washingtonpost.com/nation/interactive/2025/charlie-kirk-shooting-timeline/","https://www.nbcnews.com/news/us-news/live-blog/live-updates-shooting-charlie-kirk-event-utah-rcna230437"] },
+
+  { id:"erika", label:"ERIKA\nKIRK", type:"person", status:"documented", size:21,
+    cat:"PERSON OF INTEREST",
+    desc:"Charlie Kirk's widow. Immediately assumed control of TPUSA after his death — a $79M+ annual organization. Filed a speedy trial motion in January 2026. Candace Owens publicly implied her involvement in the assassination and made allegations about her activities in Romania.",
+    sources:["https://slate.com/news-and-politics/2026/02/candace-owens-charlie-kirk-erika-israel.html"] },
+
+  { id:"owens", label:"CANDACE\nOWENS", type:"person", status:"documented", size:20,
+    cat:"WHISTLEBLOWER",
+    desc:"Former TPUSA colleague and close Kirk associate. Released Kirk's private WhatsApp messages showing he was leaving the pro-Israel cause. Publicly implied inner circle and foreign government involvement in his death. Said Kirk believed he was marked since childhood and was surrounded by agents throughout his life.",
+    sources:["https://slate.com/news-and-politics/2026/02/candace-owens-charlie-kirk-erika-israel.html","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"tucker", label:"TUCKER\nCARLSON", type:"person", status:"documented", size:19,
+    cat:"PERSON",
+    desc:"At Kirk's memorial implied Kirk was killed by powerful people for telling the truth. Compared Kirk's death to the killing of Jesus Christ by powerful interests. Immediately drew accusations from pro-Israel groups for these statements.",
+    sources:["https://www.britannica.com/event/Assassination-of-Charlie-Kirk","https://www.washingtontimes.com/news/2026/apr/20/wild-conspiracy-theories-charlie-kirk-killing-boon-tyler-robinsons/","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"stone", label:"ROGER\nSTONE", type:"person", status:"documented", size:19,
+    cat:"TRUMP ALLY",
+    desc:"Trump political operative. Publicly stated the attack appeared to be a professional hit — either by a nation state, rogue elements of the US government, or a terrorist organization. Said this within hours of the shooting.",
+    sources:["https://www.britannica.com/event/Assassination-of-Charlie-Kirk","https://www.washingtontimes.com/news/2026/apr/20/wild-conspiracy-theories-charlie-kirk-killing-boon-tyler-robinsons/","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"patel", label:"KASH\nPATEL", type:"person", status:"documented", size:20,
+    cat:"INVESTIGATOR",
+    desc:"FBI Director. Trump appointee. Leads the official investigation. Testified before Congress about the assassination in the same hearing where Epstein files were discussed. Said Robinson essentially admitted to the killing. Investigation is being run by a political appointee of the administration that immediately benefited from Kirk's death.",
+    sources:["https://abcnews.com/US/visual-timeline-charlie-kirk-shooting-unfolded/story?id=125478526","https://www.britannica.com/event/Assassination-of-Charlie-Kirk","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"trump", label:"DONALD\nTRUMP", type:"person", status:"documented", size:24,
+    cat:"PRESIDENT",
+    desc:"US President. Announced Kirk's death on Truth Social within hours. Immediately blamed the radical left. Signed national security memorandums targeting antifa within two weeks. Designated antifa a terrorist organization one week after the shooting. The political response was pre-packaged in tone, speed and precision.",
+    sources:["https://www.washingtonpost.com/nation/interactive/2025/charlie-kirk-shooting-timeline/","https://www.britannica.com/event/Assassination-of-Charlie-Kirk","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"tpusa", label:"TURNING\nPOINT USA", type:"org", status:"documented", size:24,
+    cat:"ORGANIZATION",
+    desc:"Conservative youth organization co-founded by Kirk. Present on nearly 4,000 campuses. Annual revenue $79.2M (2022). Control transferred to Erika Kirk immediately and seamlessly after assassination. One of the most powerful conservative youth mobilization machines in US history.",
+    sources:["https://www.pbs.org/newshour/politics/4-things-to-to-know-about-the-fatal-shooting-of-charlie-kirk","https://www.britannica.com/event/Assassination-of-Charlie-Kirk"] },
+
+  { id:"fbi", label:"FBI", type:"org", status:"documented", size:21,
+    cat:"AGENCY",
+    desc:"Leading federal investigation under Trump-appointed director Kash Patel. Facial recognition on suspect footage initially unsuccessful. Conducted second bullet analysis after ATF inconclusive result. Claims to have video of Robinson firing — but this footage has never been publicly released.",
+    sources:["https://abcnews.com/US/visual-timeline-charlie-kirk-shooting-unfolded/story?id=125478526","https://www.washingtonpost.com/nation/interactive/2025/charlie-kirk-shooting-timeline/"] },
+
+  { id:"atf", label:"ATF", type:"org", status:"documented", size:20,
+    cat:"AGENCY",
+    desc:"Conducted ballistics analysis on the alleged murder weapon. COULD NOT conclusively tie the bullet fragment recovered from Kirk's autopsy to Robinson's rifle. Report states the fragment could not be identified or excluded — meaning the fatal bullet may have come from a completely different weapon.",
+    sources:["https://www.abc4.com/news/charlie-kirk-shooting/atf-report-rifle-charlie-kirk-tyler-robinson/","https://www.deseret.com/utah/2026/04/16/tyler-robinson-case-bullet-casing-evidence-alleged-murder-weapon-charlie-kirk/"] },
+
+  { id:"mercer", label:"MERCER\nFAMILY", type:"funding", status:"documented", size:21,
+    cat:"FUNDING",
+    desc:"Major early donors to Turning Point USA. Robert and Rebekah Mercer — billionaire family with deep ties to intelligence-adjacent donor networks, Cambridge Analytica, and Breitbart. Helped build the infrastructure Kirk operated within from the beginning.",
+    sources:["https://www.pbs.org/newshour/politics/4-things-to-to-know-about-the-fatal-shooting-of-charlie-kirk"] },
+
+  { id:"uvu", label:"UTAH VALLEY\nUNIV.", type:"org", status:"documented", size:19,
+    cat:"LOCATION",
+    desc:"Site of the assassination. Rooftop of the Losee Center used by alleged shooter — it was completely unmonitored and easily accessible. Only 6 campus police officers at event. No metal detectors. Security barriers and cameras only installed AFTER the shooting. A former Secret Service agent said the rooftop represented a significant vulnerability.",
+    sources:["https://www.foxnews.com/us/charlie-kirk-assassination-exclusive-photos-show-path-campus-rooftop-weeks-later-access-scrutinized"] },
+
+  { id:"wound", label:"NO EXIT\nWOUND", type:"event", status:"documented", size:22,
+    cat:"ANOMALY",
+    desc:"Kirk was allegedly shot with a .30-06 rifle at 142 yards. His surgeon said the bullet absolutely should have gone through — through-and-through wounds are always the result at this caliber and distance. Yet the bullet was found lodged just beneath the skin on the far side. No official medical examiner report has been made public. The only explanation came from a media spokesperson — not clinical documentation.",
+    sources:["https://www.foxnews.com/us/charlie-kirk-ally-reveals-absolute-miracle-may-have-saved-lives-during-fatal-shooting","https://www.tactical-medicine.com/blogs/news/what-we-know-so-far-about-charlie-kirs-injuries-from-a-medical-prespective"] },
+
+  { id:"atf_result", label:"ATF\nINCONCLUSIVE", type:"event", status:"documented", size:22,
+    cat:"ANOMALY",
+    desc:"ATF could NOT match the bullet fragment recovered from Kirk's autopsy to Robinson's rifle. The report states: firearms that produce general rifling characteristics similar to those observed on the bullet jacket fragment include numerous makes and models. The fatal bullet may have come from a completely different weapon. This is the single most important forensic fact in the case.",
+    sources:["https://www.abc4.com/news/charlie-kirk-shooting/atf-report-rifle-charlie-kirk-tyler-robinson/","https://www.pbs.org/newshour/nation/did-a-bullet-analysis-clear-charlie-kirks-suspected-killer-what-an-inconclusive-result-means"] },
+
+  { id:"no_witness", label:"NO ROOFTOP\nWITNESS", type:"event", status:"documented", size:21,
+    cat:"ANOMALY",
+    desc:"With 3,000 people at the event, not one eyewitness reported seeing a shooter on the Losee Center rooftop at the moment the shot was fired. All surveillance footage shows movement before and after the shot — never the act of firing. Prosecutors claim to have video of Robinson firing but this footage has never been publicly released or independently verified.",
+    sources:["https://www.cnn.com/us/live-news/charlie-kirk-shot-utah-death-09-11-25","https://www.nbcnews.com/news/us-news/live-blog/live-updates-shooting-charlie-kirk-event-utah-rcna230437"] },
+
+  { id:"israel_shift", label:"KIRK LEFT\nPRO-ISRAEL", type:"event", status:"documented", size:21,
+    cat:"MOTIVE THREAD",
+    desc:"Private WhatsApp messages released by Candace Owens show Kirk stated he had no choice but to leave the pro-Israel cause. An Infowars host posted in August 2025 — weeks before the shooting — that Kirk believed Israel would kill him if he turned against them. Kirk was simultaneously calling for Epstein file release and opposing Ukraine aid.",
+    sources:["https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk","https://slate.com/news-and-politics/2026/02/candace-owens-charlie-kirk-erika-israel.html"] },
+
+  { id:"silence", label:"ROBINSON\nSILENCED", type:"event", status:"documented", size:20,
+    cat:"ANOMALY",
+    desc:"Nearly 8 months after the shooting Robinson has given zero public interviews or statements. Cameras are being fought out of the courtroom by his own defense. He is isolated, faces death penalty, and the entire case narrative is controlled by prosecutor statements. The sheriff who originally took Robinson into custody resigned the same day the ATF inconclusive report became public.",
+    sources:["https://www.cnn.com/2026/04/17/us/tyler-robinson-charlie-kirk-cameras-hearing","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"pol_speed", label:"INSTANT\nPOLITICAL USE", type:"event", status:"documented", size:21,
+    cat:"MOTIVE THREAD",
+    desc:"Trump weaponized Kirk's death within hours. Antifa designated terrorist organization within one week. National security memorandums signed within two weeks. Trans community framed as terror threat. The political response was too precise and pre-packaged to be improvised grief. Every policy action had been prepared in advance.",
+    sources:["https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk","https://www.britannica.com/event/Assassination-of-Charlie-Kirk"] },
+
+  { id:"epstein", label:"EPSTEIN\nFILES", type:"event", status:"documented", size:20,
+    cat:"MOTIVE THREAD",
+    desc:"Kirk was among the most prominent youth-facing voices demanding Epstein file release. FBI Director Patel was questioned about Epstein files in the same congressional hearing about Kirk's assassination. Kirk's removal silenced the most effective young-audience voice demanding network exposure.",
+    sources:["https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+
+  { id:"mossad", label:"STATE ACTOR\nQUESTION", type:"alleged", status:"alleged", size:20,
+    cat:"OPEN QUESTION",
+    desc:"OPEN QUESTION: Was a state actor involved? Roger Stone publicly named a nation state as a possible perpetrator within hours of the shooting. Tucker Carlson implied powerful interests killed Kirk for telling the truth. Kirk's own private messages said he feared being killed by Israel if he turned against them. Netanyahu denied involvement. No direct evidence of state actor involvement has been established. The question remains open.",
+    sources:["https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk","https://www.washingtontimes.com/news/2026/apr/20/wild-conspiracy-theories-charlie-kirk-killing-boon-tyler-robinsons/","https://www.thegatewaypundit.com/2026/04/how-media-killed-charlie-kirk-are-fanning-political/"] },
+
+  { id:"patsy", label:"LONE GUNMAN\nQUESTION", type:"alleged", status:"alleged", size:19,
+    cat:"OPEN QUESTION",
+    desc:"OPEN QUESTION: Did Robinson act entirely alone? He turned himself in voluntarily 33 hours after the shooting. He left a written confession. He told friends on Discord. His closest person had zero knowledge. The ATF could not tie the fatal bullet to his rifle. No eyewitness saw him fire. These are documented facts — whether they point to a lone actor or something more complex is an open question the evidence has not fully resolved.",
+    sources:["https://www.abc4.com/news/charlie-kirk-shooting/atf-report-rifle-charlie-kirk-tyler-robinson/","https://www.pbs.org/newshour/nation/did-a-bullet-analysis-clear-charlie-kirks-suspected-killer-what-an-inconclusive-result-means","https://www.washingtontimes.com/news/2026/apr/20/wild-conspiracy-theories-charlie-kirk-killing-boon-tyler-robinsons/"] },
+
+  { id:"inner_circle", label:"INNER CIRCLE\nQUESTION", type:"alleged", status:"alleged", size:19,
+    cat:"OPEN QUESTION",
+    desc:"OPEN QUESTION: Was anyone close to Kirk involved? Candace Owens — who knew Kirk personally — publicly raised questions about TPUSA inner circle and Erika Kirk specifically, making allegations about activities in Romania. Control of a $79M organization transferred seamlessly immediately after his death. These are documented public statements by a named individual. Whether they reflect reality is unestablished and unproven.",
+    sources:["https://slate.com/news-and-politics/2026/02/candace-owens-charlie-kirk-erika-israel.html","https://en.wikipedia.org/wiki/Assassination_of_Charlie_Kirk"] },
+];
+
+const links = [
+  { source:"kirk", target:"tpusa", type:"documented" },
+  { source:"kirk", target:"trump", type:"documented" },
+  { source:"kirk", target:"robinson", type:"documented" },
+  { source:"kirk", target:"wound", type:"documented" },
+  { source:"kirk", target:"israel_shift", type:"documented" },
+  { source:"kirk", target:"epstein", type:"documented" },
+  { source:"robinson", target:"atf_result", type:"documented" },
+  { source:"robinson", target:"no_witness", type:"documented" },
+  { source:"robinson", target:"silence", type:"documented" },
+  { source:"tpusa", target:"erika", type:"documented" },
+  { source:"tpusa", target:"mercer", type:"funding" },
+  { source:"trump", target:"pol_speed", type:"documented" },
+  { source:"trump", target:"patel", type:"documented" },
+  { source:"patel", target:"fbi", type:"documented" },
+  { source:"fbi", target:"atf", type:"documented" },
+  { source:"atf", target:"atf_result", type:"documented" },
+  { source:"owens", target:"israel_shift", type:"documented" },
+  { source:"owens", target:"inner_circle", type:"alleged" },
+  { source:"tucker", target:"mossad", type:"alleged" },
+  { source:"stone", target:"mossad", type:"alleged" },
+  { source:"uvu", target:"no_witness", type:"documented" },
+  { source:"robinson", target:"patsy", type:"alleged" },
+  { source:"erika", target:"inner_circle", type:"alleged" },
+  { source:"israel_shift", target:"mossad", type:"alleged" },
+  { source:"epstein", target:"mossad", type:"alleged" },
+  { source:"pol_speed", target:"trump", type:"alleged" },
+];
+
+const nodeColors = { person:"#00b4ff", org:"#bf00ff", event:"#ff0055", funding:"#ffd700", alleged:"#ff6b00" };
+
+// Store raw string IDs before D3 mutates source/target into objects
+const rawLinks = links.map(l=>({...l, sid:l.source, tid:l.target}));
+
+const container = document.getElementById("graph");
+let width = container.clientWidth, height = container.clientHeight;
+const svg = d3.select("#graph").append("svg").attr("width",width).attr("height",height);
+const g = svg.append("g");
+
+const zoom = d3.zoom().scaleExtent([0.25,3]).on("zoom", e => g.attr("transform",e.transform));
+
+function resetZoom() {
+  svg.call(zoom.transform, d3.zoomIdentity.translate(width/2,height/2).scale(width<500?0.55:0.75));
+}
+svg.call(zoom);
+resetZoom();
+
+const defs = svg.append("defs");
+Object.entries(nodeColors).forEach(([id,color]) => {
+  const f = defs.append("filter").attr("id","glow-"+id).attr("x","-50%").attr("y","-50%").attr("width","200%").attr("height","200%");
+  f.append("feGaussianBlur").attr("stdDeviation","3").attr("result","blur");
+  const m = f.append("feMerge");
+  m.append("feMergeNode").attr("in","blur");
+  m.append("feMergeNode").attr("in","SourceGraphic");
+});
+
+let activeFilter = "all";
+let selectedId = null;
+
+// Overlay dismiss
+document.getElementById("overlay-btn").onclick = () => {
+  const ov = document.getElementById("overlay");
+  ov.classList.add("hidden");
+  setTimeout(()=>{ ov.style.display="none"; }, 400);
+};
+
+// Home/reset button
+document.getElementById("home-btn").onclick = () => {
+  resetZoom();
+};
+
+// Filter hint
+let hintTimer;
+function showFilterHint(msg) {
+  const hint = document.getElementById("filter-hint");
+  hint.textContent = msg;
+  hint.classList.add("show");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(()=>hint.classList.remove("show"), 2500);
+}
+
+function getVisibleNodes() {
+  if(activeFilter==="all") return nodes;
+  if(activeFilter==="alleged") return nodes.filter(n=>n.status==="alleged");
+  return nodes.filter(n=>n.type===activeFilter||n.id==="kirk");
+}
+
+function getFilteredLinks(vIds) {
+  return rawLinks.filter(l=>vIds.has(l.sid)&&vIds.has(l.tid));
+}
+
+function buildGraph() {
+  g.selectAll("*").remove();
+  selectedId = null;
+
+  const vNodes = getVisibleNodes();
+  const vIds = new Set(vNodes.map(n=>n.id));
+  const filteredLinks = getFilteredLinks(vIds);
+  const nodeMap = Object.fromEntries(vNodes.map(n=>[n.id,{...n}]));
+  const linkData = filteredLinks.map(l=>({...l,source:nodeMap[l.sid],target:nodeMap[l.tid]})).filter(l=>l.source&&l.target);
+
+  const sim = d3.forceSimulation(Object.values(nodeMap))
+    .force("link",d3.forceLink(linkData).id(d=>d.id).distance(d=>(d.source.size>20||d.target.size>20)?170:120).strength(0.4))
+    .force("charge",d3.forceManyBody().strength(-300))
+    .force("center",d3.forceCenter(0,0))
+    .force("collision",d3.forceCollide(d=>d.size+28));
+
+  const link = g.append("g").selectAll("line").data(linkData).join("line")
+    .attr("class",d=>"link "+(d.type||"documented"));
+
+  const node = g.append("g").selectAll(".node").data(Object.values(nodeMap)).join("g")
+    .attr("class","node")
+    .call(d3.drag()
+      .on("start",(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;})
+      .on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;})
+    )
+    .on("click",(e,d)=>{
+      e.stopPropagation();
+      selectedId = d.id;
+      g.selectAll(".node").classed("selected", n=>n.id===selectedId);
+      openPanel(d);
+    });
+
+  node.append("circle")
+    .attr("r",d=>d.size)
+    .attr("fill",d=>nodeColors[d.type]||"#7aadbe")
+    .attr("fill-opacity",0.15)
+    .attr("stroke",d=>nodeColors[d.type]||"#7aadbe")
+    .attr("filter",d=>`url(#glow-${d.type})`);
+
+  // Labels — scale font size to node radius so text stays inside circle
+  node.each(function(d){
+    const lines = d.label.split("\n");
+    const fs = Math.max(7, Math.min(10, Math.floor(d.size * 0.38)));
+    const lh = fs + 3;
+    lines.forEach((line,i)=>{
+      d3.select(this).append("text")
+        .attr("y",(i-(lines.length-1)/2)*lh + 1)
+        .style("font-size", fs+"px")
+        .text(line);
+    });
+  });
+
+  sim.on("tick",()=>{
+    link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
+        .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+    node.attr("transform",d=>`translate(${d.x},${d.y})`);
+  });
+
+  document.getElementById("node-info").textContent = vNodes.length+" NODES // "+linkData.length+" LINKS";
+}
+
+// Swipe-to-close panel on mobile
+let touchStartY = 0;
+const panel = document.getElementById("detail-panel");
+panel.addEventListener("touchstart", e=>{ touchStartY = e.touches[0].clientY; }, {passive:true});
+panel.addEventListener("touchend", e=>{
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if(dy > 60) closePanel(); // swipe down 60px closes
+}, {passive:true});
+
+function openPanel(d) {
+  document.getElementById("panel-cat").textContent="// "+d.cat;
+  document.getElementById("panel-cat").style.color=nodeColors[d.type]||"#7aadbe";
+  document.getElementById("panel-title").textContent=d.label.replace("\n"," ");
+  const st=document.getElementById("panel-status");
+  st.textContent=d.status==="documented"?"● DOCUMENTED FACT":"◌ OPEN QUESTION";
+  st.className="panel-status "+d.status;
+  document.getElementById("panel-desc").textContent=d.desc;
+
+  const connEl=document.getElementById("panel-connections");
+  const connected=rawLinks.filter(l=>l.sid===d.id||l.tid===d.id);
+  if(connected.length){
+    connEl.innerHTML='<div class="panel-section-title">// CONNECTIONS</div>';
+    connected.forEach(l=>{
+      const oid = l.sid===d.id ? l.tid : l.sid;
+      const other=nodes.find(n=>n.id===oid);
+      if(!other)return;
+      const tag=document.createElement("span");
+      tag.className="connection-tag";
+      const dot=document.createElement("span");
+      dot.className="tag-dot";
+      dot.style.background=nodeColors[other.type]||"#7aadbe";
+      dot.style.boxShadow=`0 0 4px ${nodeColors[other.type]||"#7aadbe"}`;
+      tag.appendChild(dot);
+      tag.appendChild(document.createTextNode(other.label.replace("\n"," ")));
+      tag.onclick=()=>{
+        selectedId=other.id;
+        g.selectAll(".node").classed("selected",n=>n.id===selectedId);
+        openPanel(other);
+      };
+      connEl.appendChild(tag);
+    });
+  } else { connEl.innerHTML=""; }
+
+  const srcEl=document.getElementById("panel-sources");
+  if(d.sources&&d.sources.length){
+    srcEl.innerHTML='<div class="panel-section-title">// SOURCES</div>';
+    d.sources.forEach(s=>{
+      const a=document.createElement("a");
+      a.className="source-link"; a.href=s; a.target="_blank"; a.rel="noopener noreferrer";
+      a.textContent=s.replace("https://","").substring(0,52)+"…";
+      srcEl.appendChild(a);
+    });
+  } else { srcEl.innerHTML=""; }
+
+  panel.classList.add("open");
+  document.getElementById("status-text").textContent="// INVESTIGATING: "+d.label.replace("\n"," ");
+}
+
+function closePanel(){
+  panel.classList.remove("open");
+  document.getElementById("status-text").textContent="// NETWORK ACTIVE";
+  selectedId=null;
+  g.selectAll(".node").classed("selected",false);
+}
+
+document.getElementById("panel-close").onclick=closePanel;
+svg.on("click",closePanel);
+
+document.querySelectorAll(".filter-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".filter-btn").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    activeFilter=btn.dataset.filter;
+    closePanel();
+    buildGraph();
+    resetZoom();
+    // show hint explaining filtered view
+    const hints = {
+      all:"// SHOWING FULL NETWORK",
+      person:"// FILTERED: PEOPLE — CHARLIE KIRK ALWAYS SHOWN",
+      org:"// FILTERED: ORGANIZATIONS — CHARLIE KIRK ALWAYS SHOWN",
+      funding:"// FILTERED: FUNDING SOURCES — CHARLIE KIRK ALWAYS SHOWN",
+      event:"// FILTERED: EVENTS & ANOMALIES — CHARLIE KIRK ALWAYS SHOWN",
+      alleged:"// FILTERED: OPEN QUESTIONS ONLY"
+    };
+    showFilterHint(hints[activeFilter]||"// FILTER ACTIVE");
+  });
+});
+
+window.addEventListener("resize",()=>{
+  width=container.clientWidth;
+  height=container.clientHeight;
+  svg.attr("width",width).attr("height",height);
+  buildGraph();
+  resetZoom();
+});
+
+buildGraph();
+</script>
+</body>
+</html>
